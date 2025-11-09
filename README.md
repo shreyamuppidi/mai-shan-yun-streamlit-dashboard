@@ -167,6 +167,7 @@ To download the latest MSY data:
 ```bash
 python download_msy_data.py
 ```
+We use the dataset provided in the https://github.com/tamu-datathon-org/mai-shen-yun repo.
 
 ## 🛠️ Development
 
