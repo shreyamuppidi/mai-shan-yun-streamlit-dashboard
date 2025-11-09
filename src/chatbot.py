@@ -56,23 +56,32 @@ class InventoryChatbot:
         self.conversation_history = []
         
         # System prompt describing available functions
-        self.system_prompt = """You are an AI assistant for a restaurant inventory management system. 
+        self.system_prompt = """You are Yun Chef, an AI assistant for a restaurant inventory management system. 
 You help users understand their inventory data, costs, waste, usage patterns, and menu viability.
+
+Your name is Yun Chef, but you can also be called "Yun". When users address you as "Yun" or "Yun Chef", respond naturally to that name.
 
 Your capabilities:
 1. **Data Analysis**: Answer questions about inventory, usage, costs, waste, revenue, and menu viability
 2. **Recipe Generation**: Create step-by-step cooking instructions based on ingredient lists
 3. **Recommendations**: Provide actionable advice
 4. **Natural Language**: Understand and respond to questions in a conversational, helpful way
+5. **Follow-up Questions**: Maintain conversation context to answer follow-up questions naturally
 
 When answering questions:
 - Be conversational, friendly, and helpful
+- Keep responses concise and direct - ONLY answer what was asked, nothing more
+- Do NOT provide extra information that wasn't requested
+- Do NOT mention things that can't be done unless specifically asked
 - Use specific numbers and data when available
 - For recipes: You will receive ingredient lists with quantities. Generate clear, step-by-step cooking instructions even if you don't have the exact recipe. Use your knowledge of cooking techniques to create reasonable instructions.
-- For data questions: Use the provided data to give accurate, specific answers
+- For data questions: Use the provided data to give accurate, specific answers - don't add extra information unless relevant
+- For "what can I make" questions: ONLY list dishes that can be made with their serving counts - do NOT mention dishes that can't be made
+- For follow-up questions: Use conversation history to understand context (e.g., if user previously asked about dishes, a follow-up "what about that one?" refers to a previously mentioned dish)
 - Be creative when appropriate (e.g., generating recipes, providing cooking tips)
-- If data is unavailable, explain why and suggest alternatives
+- If data is unavailable, explain why briefly and suggest alternatives
 - Format numbers clearly (e.g., $1,234.56, 1,234 units)
+- Optionally end responses with 1-2 brief, helpful follow-up suggestions - but keep them as suggestions, not required information
 
 When asked for recipes or cooking instructions:
 - List all ingredients with their quantities first
@@ -80,7 +89,19 @@ When asked for recipes or cooking instructions:
 - Include helpful tips (cooking temperatures, times, techniques) based on the dish type
 - Be creative and practical - you're helping a restaurant kitchen!
 
-Remember: You're an AI assistant that can generate creative content like recipes and cooking instructions, not just format data."""
+When asked "what can I make" or similar questions:
+- ONLY list dishes that CAN be made with current inventory
+- Include the number of servings possible for each dish
+- Keep it simple and direct - ONLY answer what was asked
+- DO NOT mention dishes that cannot be made
+- DO NOT list missing ingredients for dishes that can't be made
+- DO NOT say "however" or "but" followed by information about dishes that can't be made
+- DO NOT provide examples of dishes that can't be made
+- If asked "what can I make", respond ONLY with dishes that can be made and their serving counts
+- Optionally end with 1-2 brief follow-up suggestions (e.g., "Would you like cooking instructions?" or "Need help with anything else?")
+- Keep the response focused and concise
+
+Remember: You are Yun Chef, an AI assistant that can generate creative content like recipes and cooking instructions, not just format data. Maintain conversation context to answer follow-up questions naturally."""
     
     def _get_top_ingredients(self, metric: str = 'usage', limit: int = 10, period_days: int = 30) -> Dict:
         """Get top ingredients by usage, cost, or waste"""
@@ -105,8 +126,76 @@ Remember: You're an AI assistant that can generate creative content like recipes
         except Exception as e:
             return {'error': str(e)}
     
-    def _get_revenue_by_dish(self, period_days: int = 30) -> Dict:
-        """Calculate revenue by menu item"""
+    def _extract_month_year(self, query: str) -> tuple:
+        """Extract month and year from query. If year not specified, uses most recent year with data."""
+        import re
+        query_lower = query.lower()
+        
+        month_map = {
+            'january': 1, 'jan': 1,
+            'february': 2, 'feb': 2,
+            'march': 3, 'mar': 3,
+            'april': 4, 'apr': 4,
+            'may': 5,
+            'june': 6, 'jun': 6,
+            'july': 7, 'jul': 7,
+            'august': 8, 'aug': 8,
+            'september': 9, 'sep': 9, 'sept': 9,
+            'october': 10, 'oct': 10,
+            'november': 11, 'nov': 11,
+            'december': 12, 'dec': 12
+        }
+        
+        month = None
+        year = None
+        
+        # Extract month name (check longer names first to avoid partial matches)
+        for month_name, month_num in sorted(month_map.items(), key=lambda x: len(x[0]), reverse=True):
+            # Use word boundaries to avoid partial matches
+            pattern = r'\b' + re.escape(month_name) + r'\b'
+            if re.search(pattern, query_lower):
+                month = month_num
+                break
+        
+        # Extract year (4 digits)
+        year_match = re.search(r'\b(20\d{2})\b', query)
+        if year_match:
+            year = int(year_match.group(1))
+        else:
+            # If year not specified, find the most recent year with data for this month
+            if month is not None:
+                try:
+                    sales = self.analytics.data.get('sales', pd.DataFrame())
+                    if not sales.empty and 'date' in sales.columns:
+                        sales = sales.copy()
+                        sales['date'] = pd.to_datetime(sales['date'], errors='coerce')
+                        sales = sales[sales['date'].notna()]
+                        # Filter to the requested month
+                        month_sales = sales[sales['date'].dt.month == month]
+                        if not month_sales.empty:
+                            # Get the most recent year for this month
+                            year = int(month_sales['date'].dt.year.max())
+                        else:
+                            # No data for this month, use current year
+                            year = datetime.now().year
+                    else:
+                        year = datetime.now().year
+                except:
+                    year = datetime.now().year
+            else:
+                # No month specified, use current year
+                year = datetime.now().year
+        
+        return month, year
+    
+    def _get_revenue_by_dish(self, period_days: int = None, month: int = None, year: int = None) -> Dict:
+        """Calculate revenue by menu item
+        
+        Args:
+            period_days: Filter by last N days (if provided)
+            month: Filter by specific month (1-12)
+            year: Filter by specific year (defaults to current year)
+        """
         try:
             sales = self.analytics.data.get('sales', pd.DataFrame())
             if sales.empty:
@@ -123,34 +212,47 @@ Remember: You're an AI assistant that can generate creative content like recipes
             if sales.empty:
                 return {'error': 'No valid sales data with dates'}
             
-            # Try to filter by period, but fallback to all data if no recent data
-            cutoff_date = datetime.now() - timedelta(days=period_days)
-            recent_sales = sales[sales['date'] >= cutoff_date].copy()
-            
-            # If no data in the requested period, use all available data
-            if recent_sales.empty:
-                # Use all available sales data
-                recent_sales = sales.copy()
-                # Note: We're using all data, not just last 30 days
-                period_note = "all available"
-            else:
+            # Filter by month/year if specified
+            if month is not None:
+                if year is None:
+                    year = datetime.now().year
+                # Filter to specific month
+                filtered_sales = sales[
+                    (sales['date'].dt.month == month) & 
+                    (sales['date'].dt.year == year)
+                ].copy()
+                period_note = f"{datetime(year, month, 1).strftime('%B %Y')}"
+            elif period_days is not None:
+                # Filter by last N days
+                cutoff_date = datetime.now() - timedelta(days=period_days)
+                filtered_sales = sales[sales['date'] >= cutoff_date].copy()
                 period_note = f"last {period_days} days"
+            else:
+                # Use all available data
+                filtered_sales = sales.copy()
+                period_note = "all available"
             
-            if recent_sales.empty:
-                return {'error': 'No sales data available'}
+            # If no data in the requested period, return error with helpful message
+            if filtered_sales.empty:
+                if month is not None:
+                    month_name = datetime(year if year else datetime.now().year, month, 1).strftime('%B')
+                    available_months = sorted(sales['date'].dt.to_period('M').unique().astype(str).tolist())
+                    return {'error': f'No sales data available for {month_name} {year if year else datetime.now().year}. Available months: {", ".join(available_months)}'}
+                else:
+                    return {'error': 'No sales data available for the requested period'}
             
             # Calculate revenue (quantity_sold * price if price column exists, else use revenue column, else estimate)
-            if 'revenue' in recent_sales.columns and recent_sales['revenue'].sum() > 0:
+            if 'revenue' in filtered_sales.columns and filtered_sales['revenue'].sum() > 0:
                 # Use existing revenue column
-                recent_sales['calculated_revenue'] = recent_sales['revenue']
-            elif 'price' in recent_sales.columns:
+                filtered_sales['calculated_revenue'] = filtered_sales['revenue']
+            elif 'price' in filtered_sales.columns:
                 # Calculate from price * quantity
-                recent_sales['calculated_revenue'] = recent_sales['quantity_sold'] * recent_sales['price']
+                filtered_sales['calculated_revenue'] = filtered_sales['quantity_sold'] * filtered_sales['price']
             else:
                 # Estimate revenue if price not available (use quantity as proxy)
-                recent_sales['calculated_revenue'] = recent_sales['quantity_sold']
+                filtered_sales['calculated_revenue'] = filtered_sales['quantity_sold']
             
-            revenue_by_dish = recent_sales.groupby('menu_item').agg({
+            revenue_by_dish = filtered_sales.groupby('menu_item').agg({
                 'calculated_revenue': 'sum',
                 'quantity_sold': 'sum'
             }).reset_index()
@@ -160,7 +262,9 @@ Remember: You're an AI assistant that can generate creative content like recipes
             return {
                 'data': revenue_by_dish.to_dict('records'),
                 'total_revenue': revenue_by_dish['revenue'].sum(),
-                'period_note': period_note  # Note about which period was used
+                'period_note': period_note,  # Note about which period was used
+                'month': month,  # Include month for debugging
+                'year': year  # Include year for debugging
             }
         except Exception as e:
             return {'error': str(e)}
@@ -274,9 +378,7 @@ Remember: You're an AI assistant that can generate creative content like recipes
                 'viability_score': viability_score,
                 'total_dishes': len(viability_df),
                 'can_make_count': len(can_make),
-                'cannot_make_count': len(cannot_make),
                 'can_make_items': can_make_items,  # Now includes actual dish names!
-                'cannot_make_items': cannot_make[['menu_item', 'missing_ingredients']].to_dict('records')[:10],
                 'recipes': recipe_info  # Include recipe information
             }
         except Exception as e:
@@ -464,48 +566,125 @@ Remember: You're an AI assistant that can generate creative content like recipes
         result = None
         data_fetched = False
         
+        # Check if user explicitly asked for a chart/graph/visualization
+        # Only create charts if explicitly requested with strong keywords
+        chart_keywords = ['show me a', 'display a', 'create a', 'generate a', 'draw a', 'make a', 'plot a', 'graph of', 'chart of', 'visualize', 'visualization']
+        user_wants_chart = any(keyword in query_lower for keyword in chart_keywords)
+        
+        # Check for month-only queries first (follow-up questions)
+        month, year = self._extract_month_year(user_query)
+        is_followup_month_query = False
+        
+        # If user just says a month name (or "what about [month]"), check if previous query was about sales
+        if month is not None and len(query_lower.strip().split()) <= 3:  # Short query like "November?" or "what about November"
+            # Check conversation history for context
+            for msg in reversed(self.conversation_history[-4:]):
+                prev_content = msg.get('content', '').lower()
+                # Check if previous query was about sales/revenue
+                if any(word in prev_content for word in ['sales', 'revenue', 'selling', 'top selling', 'top items', 'items', 'dish', 'money', 'best selling']):
+                    is_followup_month_query = True
+                    break
+                # Check if previous response mentioned sales data
+                if msg.get('role') == 'assistant':
+                    if any(word in prev_content for word in ['revenue', 'sold', 'items', 'top selling', 'sales']):
+                        is_followup_month_query = True
+                        break
+        
         # Query routing logic - fetch relevant data
         if any(word in query_lower for word in ['most used', 'highest usage', 'top ingredient', 'ingredient used', 'which ingredient is used']):
             result = self._get_top_ingredients(metric='usage', limit=10, period_days=30)
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'bar', 'data': result, 'title': 'Top Ingredients by Usage'}
-                data_fetched = True
+            data_fetched = True
         
         elif any(word in query_lower for word in ['most wasted', 'highest waste', 'waste', 'wasted ingredient', 'which ingredient is being wasted']):
             result = self._get_waste_analysis(period_days=30, limit=10)
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'bar', 'data': result, 'title': 'Top Wasted Ingredients'}
-                data_fetched = True
+            data_fetched = True
         
-        elif any(word in query_lower for word in ['most money', 'revenue', 'highest revenue', 'best selling', 'top dish', 'which dish brings', 'brings in the most']):
-            result = self._get_revenue_by_dish(period_days=30)
-            if 'error' not in result:
+        elif is_followup_month_query or \
+             any(word in query_lower for word in ['most money', 'revenue', 'highest revenue', 'best selling', 'top dish', 'which dish brings', 'brings in the most', 'top selling', 'selling items', 'sales', 'same for', 'what about']) or \
+             (month is not None and any(word in query_lower for word in ['top', 'items', 'selling', 'sales'])):
+            # Sales/revenue query - check if user specified a month
+            # IMPORTANT: Extract month FIRST before checking "same for" logic
+            # This ensures "show me the same for november" correctly extracts November
+            if month is None:
+                # Try to extract month again (might have been missed)
+                month, year = self._extract_month_year(user_query)
+            
+            # Handle "same for" or "what about" queries - ONLY if no month was found in current query
+            # This prevents "same for november" from using previous month
+            if month is None and ('same for' in query_lower or 'same' in query_lower or 'what about' in query_lower):
+                # Look for month in previous conversation ONLY if current query has no month
+                for msg in reversed(self.conversation_history[-4:]):
+                    prev_content = msg.get('content', '').lower()
+                    prev_month, prev_year = self._extract_month_year(prev_content)
+                    if prev_month is not None:
+                        month, year = prev_month, prev_year
+                        break
+            
+            if month is not None:
+                # User asked for specific month - ensure we have the right year
+                if year is None:
+                    # Get most recent year with data for this month
+                    try:
+                        sales = self.analytics.data.get('sales', pd.DataFrame())
+                        if not sales.empty and 'date' in sales.columns:
+                            sales = sales.copy()
+                            sales['date'] = pd.to_datetime(sales['date'], errors='coerce')
+                            sales = sales[sales['date'].notna()]
+                            month_sales = sales[sales['date'].dt.month == month]
+                            if not month_sales.empty:
+                                year = int(month_sales['date'].dt.year.max())
+                            else:
+                                year = datetime.now().year
+                        else:
+                            year = datetime.now().year
+                    except:
+                        year = datetime.now().year
+                
+                # User asked for specific month
+                result = self._get_revenue_by_dish(month=month, year=year)
+            else:
+                # Default to last 30 days or all data
+                result = self._get_revenue_by_dish(period_days=30)
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'bar', 'data': result, 'title': 'Revenue by Dish'}
-                data_fetched = True
+            data_fetched = True
         
         elif any(word in query_lower for word in ['reorder', 'need to order', 'low stock', 'stockout', 'reorder recommendation']):
             result = self._get_reorder_recommendations()
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'table', 'data': result}
-                data_fetched = True
+            data_fetched = True
         
         elif any(word in query_lower for word in ['inventory', 'current stock', 'stock level', 'inventory status']):
             result = self._get_inventory_status()
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'table', 'data': result}
-                data_fetched = True
+            data_fetched = True
         
         elif any(word in query_lower for word in ['cost', 'spending', 'expense', 'total spending']):
             result = self._get_cost_analysis(period_days=30)
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'bar', 'data': result, 'title': 'Cost Analysis'}
-                data_fetched = True
+            data_fetched = True
         
-        elif any(word in query_lower for word in ['menu', 'dish', 'can make', 'viability', 'menu viability']):
+        elif any(word in query_lower for word in ['menu', 'dish', 'viability', 'menu viability']) or \
+             'can make' in query_lower or 'can i make' in query_lower or 'what can' in query_lower or \
+             'what dishes' in query_lower or 'available dishes' in query_lower:
             result = self._get_menu_viability()
-            if 'error' not in result:
+            # Only create chart if explicitly requested
+            if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'table', 'data': result}
-                data_fetched = True
+            data_fetched = True
         
         elif any(word in query_lower for word in ['recipe', 'how to make', 'ingredients for', 'what do i need', 'step by step', 'procedure', 'instructions', 'how do i make', 'how do you make']):
             # Recipe query - check conversation history for dish name
@@ -589,15 +768,69 @@ Based on these ingredients, please provide:
 
 Be creative and practical - generate reasonable cooking instructions even if you don't have the exact recipe. Use your knowledge of cooking techniques."""
             
+            elif 'can_make_items' in data_result or 'viability_score' in data_result:
+                # Menu viability query - format specially for "what can I make" questions
+                can_make = data_result.get('can_make_items', [])
+                viability_score = data_result.get('viability_score', 0)
+                
+                user_content = f"""User question: {user_query}
+
+Based on current inventory, here is what can be made:
+
+Dishes that CAN be made ({len(can_make)} dishes):"""
+                
+                if can_make:
+                    for item in can_make:
+                        servings = item.get('servings_possible', 0)
+                        dish_name = item.get('menu_item', 'Unknown')
+                        user_content += f"\n- {dish_name}: {servings} servings possible"
+                else:
+                    user_content += "\n- None (no dishes can be made with current inventory)"
+                
+                user_content += f"""
+
+CRITICAL INSTRUCTIONS:
+- The user asked "what can I make" - they ONLY want to know what dishes they CAN make
+- List ONLY the dishes shown above (the ones that CAN be made) with their serving counts
+- DO NOT mention dishes that cannot be made
+- DO NOT say "however", "but", "unfortunately", or "there are X dishes you can't make"
+- DO NOT list missing ingredients
+- DO NOT provide examples of dishes that can't be made
+- DO NOT mention the number of dishes that can't be made
+- Keep your response focused ONLY on dishes that CAN be made
+- Be concise and direct
+- Optionally end with a brief follow-up suggestion like "Would you like cooking instructions?" or "Need help with anything else?"
+
+Your response should start directly with the dishes that can be made, nothing else."""
+            
             elif has_data:
                 # Data-driven query - provide data and ask for natural response
                 data_summary = json.dumps(data_result, indent=2, default=str)
-                user_content = f"""User question: {user_query}
+                period_info = data_result.get('period_note', '')
+                
+                # Check if there's an error
+                if 'error' in data_result:
+                    error_msg = data_result.get('error', 'Unknown error')
+                    user_content = f"""User question: {user_query}
 
-Here is the relevant data:
+I tried to retrieve the data but encountered: {error_msg}
+
+Please provide a helpful response explaining that the data might not be available for the requested period, and suggest checking if the data has been uploaded or if a different time period might work."""
+                else:
+                    user_content = f"""User question: {user_query}
+
+Here is the relevant data for {period_info}:
 {data_summary}
 
-Please provide a natural, conversational answer to the user's question. Use the specific numbers and data provided. Be helpful and clear."""
+CRITICAL INSTRUCTIONS:
+- Use ONLY the data provided above - do NOT use data from previous conversation history
+- The period is: {period_info}
+- List the top selling items (menu items) with their revenue and quantities sold from the data above
+- Total revenue for {period_info} is shown in the data
+- Be specific with numbers - use the EXACT revenue and quantity values from the data provided above
+- If the data shows items like "All Day Menu", "Ramen", etc., these are the actual menu items/categories
+- Do NOT repeat information from previous messages - use ONLY the current data provided
+- The user asked about {period_info} - make sure your answer reflects the data for that specific period"""
             
             else:
                 # Error or no data
@@ -626,7 +859,13 @@ Please provide a helpful response explaining the situation and suggesting what t
                 max_tokens=800  # More tokens for recipes and detailed instructions
             )
             
-            return response.choices[0].message.content.strip()
+            response_text = response.choices[0].message.content.strip()
+            
+            # Post-process to remove unwanted information about dishes that can't be made
+            if 'can_make_items' in data_result:
+                response_text = self._filter_unwanted_content(response_text)
+            
+            return response_text
             
         except Exception as e:
             # Fallback to template response if LLM fails
@@ -636,6 +875,75 @@ Please provide a helpful response explaining the situation and suggesting what t
             else:
                 return f"I apologize, but I encountered an error: {error_msg}. Please try rephrasing your question."
     
+    def _filter_unwanted_content(self, text: str) -> str:
+        """Filter out unwanted information about dishes that can't be made"""
+        import re
+        
+        # Split by common phrases that introduce unwanted information
+        unwanted_patterns = [
+            r'However.*?\.',
+            r'But.*?\.',
+            r'Unfortunately.*?\.',
+            r'However,.*?\.',
+            r'However it.*?\.',
+            r'However, it.*?\.',
+            r'However there.*?\.',
+            r'However, there.*?\.',
+            r'However, it seems.*?\.',
+            r'However, it looks.*?\.',
+            r'However, there are.*?\.',
+            r'However there are.*?\.',
+            r'However, it appears.*?\.',
+            r'However it appears.*?\.',
+        ]
+        
+        # Remove sentences that contain unwanted information
+        lines = text.split('\n')
+        filtered_lines = []
+        skip_next = False
+        
+        for line in lines:
+            # Check if line contains unwanted patterns
+            contains_unwanted = False
+            for pattern in unwanted_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    contains_unwanted = True
+                    break
+            
+            # Check for phrases that indicate unwanted content
+            unwanted_phrases = [
+                'dishes you can\'t make',
+                'dishes you cannot make',
+                'dishes that can\'t be made',
+                'dishes that cannot be made',
+                'can\'t make right now',
+                'cannot make right now',
+                'due to missing ingredients',
+                'missing ingredients',
+                'can\'t make',
+                'cannot make',
+                'other dishes',
+                'few examples',
+                'some dishes',
+            ]
+            
+            for phrase in unwanted_phrases:
+                if phrase.lower() in line.lower():
+                    contains_unwanted = True
+                    break
+            
+            # Skip lines with unwanted content
+            if contains_unwanted:
+                continue
+            
+            # Skip list items that mention missing ingredients
+            if line.strip().startswith('-') and ('missing:' in line.lower() or 'missing ' in line.lower()):
+                continue
+            
+            filtered_lines.append(line)
+        
+        return '\n'.join(filtered_lines).strip()
+    
     def _format_response(self, query: str, result: Dict) -> str:
         """Format analytics result into natural language response"""
         if 'error' in result:
@@ -644,17 +952,16 @@ Please provide a helpful response explaining the situation and suggesting what t
         # Handle greeting/help messages
         if 'info' in result:
             if result['info'] == 'greeting':
-                return """👋 Hi! I'm your inventory assistant. I can help you with:
+                return """👋 Hi! I'm Yun Chef. I can help you with:
 
-• **Most used ingredients** - "What ingredient is used the most?"
-• **Revenue analysis** - "Which dish brings in the most money?"
-• **Waste analysis** - "Which ingredient is being wasted the most?"
-• **Inventory status** - "What's the current inventory status?"
-• **Reorder recommendations** - "What items need reordering?"
-• **Cost analysis** - "What's our total spending?"
-• **Menu viability** - "Which dishes can we make?"
+• Most used/wasted ingredients
+• Revenue by dish
+• Inventory status
+• Cost analysis
+• Menu viability
+• Reorder recommendations
 
-Just ask me a question about your inventory!"""
+Ask me anything about your inventory!"""
             elif result['info'] == 'help':
                 return """I can help you with questions about your inventory! Try asking:
 
@@ -729,17 +1036,13 @@ Please ask: What is the recipe for [dish name]? or How do I make [dish name]?"""
         elif 'viability_score' in result:
             score = result.get('viability_score', 0)
             can_make = result.get('can_make_count', 0)
-            total = result.get('total_dishes', 0)
-            cannot_make = result.get('cannot_make_count', 0)
+            can_make_items = result.get('can_make_items', [])
             response = f"Menu viability score: **{score:.1f}%**\n\n"
-            response += f"- Can make: {can_make} dishes\n"
-            response += f"- Cannot make: {cannot_make} dishes\n"
-            response += f"- Total dishes: {total}\n"
-            if cannot_make > 0:
-                cannot_items = result.get('cannot_make_items', [])
-                response += "\nDishes that cannot be made:\n"
-                for item in cannot_items[:5]:
-                    response += f"- {item['menu_item']}\n"
+            response += f"Dishes you can make ({can_make} dishes):\n"
+            for item in can_make_items:
+                dish_name = item.get('menu_item', 'Unknown')
+                servings = item.get('servings_possible', 0)
+                response += f"- {dish_name}: {servings} servings\n"
             return response
         
         elif 'total_waste_cost' in result:

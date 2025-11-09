@@ -173,7 +173,7 @@ class DataPreprocessor:
             return True
         
         # Check ingredient name for count keywords
-        count_ingredient_keywords = ['wing', 'ramen', 'egg', 'noodle']
+        count_ingredient_keywords = ['wing', 'ramen', 'egg', 'noodle', 'chicken wing', 'chicken wings']
         if any(keyword in ingredient_lower for keyword in count_ingredient_keywords):
             return True
         

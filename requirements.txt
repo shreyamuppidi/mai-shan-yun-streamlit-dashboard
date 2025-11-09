@@ -1,14 +1,28 @@
-streamlit==1.32.0
+# Backend API Dependencies
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Data Processing
 pandas==2.2.2
 numpy==1.26.4
-plotly==5.22.0
+openpyxl==3.1.2
+
+# Analytics & Machine Learning
 scikit-learn==1.4.2
 scipy==1.13.1
-openpyxl==3.1.2
-kaggle>=1.5.16
-holidays==0.84
+
+# Visualization
+plotly==5.22.0
 seaborn==0.13.2
+
+# Utilities
+holidays==0.84
 requests==2.32.2
 setuptools==69.5.1
+
+# AI/Chatbot
 openai>=1.0.0
 
+# Optional: Data Download (uncomment if needed)
+# kaggle>=1.5.16
