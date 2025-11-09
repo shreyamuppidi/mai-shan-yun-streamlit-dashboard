@@ -7,10 +7,13 @@ import { MetricCard } from '@/components/MetricCard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Loader2 } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Loader2, CheckCircle2 } from 'lucide-react'
 
 export const RiskAlerts: React.FC = () => {
   const [riskTypeFilter, setRiskTypeFilter] = useState<string[]>([])
+  const [reorderedItems, setReorderedItems] = useState<Set<string>>(new Set())
+  const [showSuccessMessage, setShowSuccessMessage] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['risk-alerts'],
@@ -39,6 +42,22 @@ export const RiskAlerts: React.FC = () => {
     : riskAlerts
 
   const sortedAlerts = [...filteredAlerts].sort((a: any, b: any) => b.risk_score - a.risk_score)
+
+  const handleReorder = (ingredient: string) => {
+    // Add to reordered items set
+    setReorderedItems((prev) => new Set([...prev, ingredient]))
+    
+    // Show success message
+    setShowSuccessMessage(ingredient)
+    
+    // Hide success message after 3 seconds
+    setTimeout(() => {
+      setShowSuccessMessage(null)
+    }, 3000)
+    
+    // In a real application, you would make an API call here:
+    // apiEndpoints.reorderItem(ingredient).then(...)
+  }
 
   return (
     <div className="space-y-6">
@@ -159,33 +178,67 @@ export const RiskAlerts: React.FC = () => {
         searchable
       />
 
+      {/* Success Message */}
+      {showSuccessMessage && (
+        <Alert className="bg-green-500/20 border-green-500/50 flex items-center gap-3">
+          <CheckCircle2 className="h-5 w-5 text-green-400 flex-shrink-0" />
+          <AlertDescription className="text-green-400 m-0">
+            Reorder request sent for <strong>{showSuccessMessage}</strong>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Critical Items */}
       {sortedAlerts.filter((item: any) => item.needs_reorder).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>🚨 Critical Items - Reorder Now</CardTitle>
+        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-red-500/30 shadow-xl">
+          <CardHeader className="border-b border-white/10">
+            <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
+              <span className="w-1 h-6 bg-gradient-to-b from-red-400 to-orange-500 rounded-full" />
+              🚨 Critical Items - Reorder Now
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pt-6">
             {sortedAlerts
               .filter((item: any) => item.needs_reorder)
               .slice(0, 5)
-              .map((item: any) => (
-                <div
-                  key={item.ingredient}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div>
-                    <h3 className="font-semibold">{item.ingredient}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Risk Score: {Math.round(item.risk_score)} - {item.risk_type}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Days until stockout: {Math.round(item.days_until_stockout)}
-                    </p>
+              .map((item: any) => {
+                const isReordered = reorderedItems.has(item.ingredient)
+                return (
+                  <div
+                    key={item.ingredient}
+                    className={`flex items-center justify-between p-4 rounded-lg border-2 transition-all duration-200 ${
+                      isReordered
+                        ? 'bg-green-500/10 border-green-500/50'
+                        : 'bg-white/5 border-white/10 hover:border-red-500/30 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-white mb-1">{item.ingredient}</h3>
+                      <p className="text-sm text-white/70">
+                        Risk Score: {Math.round(item.risk_score)} - {item.risk_type}
+                      </p>
+                      <p className="text-sm text-white/70">
+                        Days until stockout: {Math.round(item.days_until_stockout)}
+                      </p>
+                    </div>
+                    <Button
+                      variant={isReordered ? "default" : "destructive"}
+                      onClick={() => handleReorder(item.ingredient)}
+                      disabled={isReordered}
+                      className="ml-4 min-w-[120px]"
+                    >
+                      {isReordered ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Reordered
+                        </>
+                      ) : (
+                        'Reorder Now'
+                      )}
+                    </Button>
                   </div>
-                  <Button variant="destructive">Reorder Now</Button>
-                </div>
-              ))}
+                )
+              })}
           </CardContent>
         </Card>
       )}

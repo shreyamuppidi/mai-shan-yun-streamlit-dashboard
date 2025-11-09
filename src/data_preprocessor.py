@@ -82,7 +82,9 @@ class DataPreprocessor:
         self.count_keywords = ['wing', 'ramen', 'egg', 'count', 'pcs', 'piece', 'roll', 'whole', 'noodle']
         
         # Standard unit mappings
+        # Non-weight units (rolls, pieces, eggs, etc.) are mapped to 'units'
         self.unit_mappings = {
+            # Weight units
             'pound': 'lb',
             'pounds': 'lb',
             'lbs': 'lb',
@@ -92,8 +94,22 @@ class DataPreprocessor:
             'grams': 'g',
             'kilogram': 'kg',
             'kilograms': 'kg',
+            # Non-weight units -> standardized to 'units'
             'unit': 'units',
             'units': 'units',
+            'count': 'units',
+            'rolls': 'units',
+            'roll': 'units',
+            'pieces': 'units',
+            'piece': 'units',
+            'pcs': 'units',
+            'pc': 'units',
+            'eggs': 'units',
+            'egg': 'units',
+            'whole onion': 'units',
+            'whole onions': 'units',
+            'onion': 'units',
+            'onions': 'units',
         }
     
     def normalize_ingredient_name(self, name: str) -> str:
@@ -182,7 +198,8 @@ class DataPreprocessor:
     def detect_and_standardize_unit(self, ingredient: str, unit: str = None, column_name: str = None) -> str:
         """
         Detect and standardize unit for an ingredient.
-        For count-based ingredients, override to 'count' even if column says '(g)'.
+        For count-based ingredients, standardize to 'units' instead of 'count'.
+        All non-weight units (rolls, pieces, eggs, whole onion, etc.) are standardized to 'units'.
         
         Args:
             ingredient: Ingredient name
@@ -190,19 +207,15 @@ class DataPreprocessor:
             column_name: Column name that might contain unit info (optional)
             
         Returns:
-            Standardized unit string
+            Standardized unit string ('units' for non-weight, weight units for weight-based)
         """
-        # Check if count-based first (this takes priority)
-        if self.is_count_based_ingredient(ingredient, unit):
-            return 'count'
-        
         # Extract unit from column name if provided
         if column_name:
             col_lower = str(column_name).lower()
             if '(g)' in col_lower or ' (g)' in col_lower:
                 unit = 'g'
             elif '(count)' in col_lower or ' (count)' in col_lower:
-                unit = 'count'
+                unit = 'units'  # Changed from 'count' to 'units'
             elif '(lb)' in col_lower or ' (lb)' in col_lower:
                 unit = 'lb'
             elif '(oz)' in col_lower or ' (oz)' in col_lower:
@@ -210,16 +223,44 @@ class DataPreprocessor:
             elif '(kg)' in col_lower or ' (kg)' in col_lower:
                 unit = 'kg'
         
-        # Standardize unit name
+        # Standardize unit name using mappings
         if unit:
             unit_lower = str(unit).lower().strip()
+            
+            # First check mappings
             if unit_lower in self.unit_mappings:
                 return self.unit_mappings[unit_lower]
-            # Return as-is if already standard
-            if unit_lower in ['g', 'kg', 'lb', 'oz', 'count', 'units']:
+            
+            # Check if it's a non-weight unit (contains count keywords) - be more aggressive
+            non_weight_keywords = ['roll', 'piece', 'pcs', 'pc', 'egg', 'whole', 'onion', 'count', 'rolls', 'pieces', 'eggs', 'onions']
+            if any(keyword in unit_lower for keyword in non_weight_keywords):
+                return 'units'
+            
+            # Check if it's a weight unit
+            weight_units = ['g', 'gram', 'grams', 'kg', 'kilogram', 'kilograms', 'lb', 'pound', 'pounds', 'lbs', 'oz', 'ounce', 'ounces']
+            if unit_lower in weight_units:
+                # Map to standard weight unit
+                if unit_lower in ['gram', 'grams']:
+                    return 'g'
+                elif unit_lower in ['kilogram', 'kilograms']:
+                    return 'kg'
+                elif unit_lower in ['pound', 'pounds', 'lbs']:
+                    return 'lb'
+                elif unit_lower in ['ounce', 'ounces']:
+                    return 'oz'
+                else:
+                    return unit_lower  # Already standard (g, kg, lb, oz)
+            
+            # If not recognized, default to 'units' for non-weight items
+            # Only use weight units if we're certain it's weight-based
+            if unit_lower in ['g', 'kg', 'lb', 'oz']:
                 return unit_lower
         
-        # Default to 'units' if not count-based and no unit detected
+        # Check if count-based ingredient (this takes priority for standardization)
+        if self.is_count_based_ingredient(ingredient, unit):
+            return 'units'  # Changed from 'count' to 'units'
+        
+        # Default to 'units' if not weight-based and no unit detected
         return 'units'
     
     def preprocess_purchases(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -441,7 +482,8 @@ class DataPreprocessor:
         if 'frequency' in df.columns:
             df['frequency'] = df['frequency'].astype(str).str.strip().str.lower()
         
-        # Normalize unit
+        # Normalize unit - handle both 'Unit of shipment' and 'unit' columns
+        # Note: MSY loader renames 'Unit of shipment' to 'unit', so we need to handle both
         if 'Unit of shipment' in df.columns:
             df['Unit of shipment'] = df.apply(
                 lambda row: self.detect_and_standardize_unit(
@@ -450,6 +492,55 @@ class DataPreprocessor:
                 ),
                 axis=1
             )
+            # Also create/update 'unit' column for consistency
+            if 'unit' not in df.columns:
+                df['unit'] = df['Unit of shipment']
+            else:
+                df['unit'] = df['Unit of shipment']
+        
+        # Handle 'unit' column (this is the renamed column from MSY loader)
+        # This is the main column that will be used after MSY loader renames 'Unit of shipment' to 'unit'
+        if 'unit' in df.columns:
+            # Direct conversion for known non-weight units - do this BEFORE any other processing
+            # Map all non-weight units to 'units'
+            non_weight_patterns = [
+                'rolls', 'roll', 'pieces', 'piece', 'pcs', 'pc', 
+                'eggs', 'egg', 'whole onion', 'whole onions', 
+                'onion', 'onions', 'count'
+            ]
+            
+            # Convert to lowercase and strip for comparison
+            def convert_unit(unit_val):
+                if pd.isna(unit_val) or unit_val == '':
+                    return 'units'
+                
+                unit_lower = str(unit_val).lower().strip()
+                
+                # Check if it matches any non-weight pattern
+                for pattern in non_weight_patterns:
+                    if pattern in unit_lower or unit_lower == pattern:
+                        return 'units'
+                
+                # Keep weight units as-is
+                weight_units = ['lbs', 'lb', 'g', 'kg', 'oz', 'gram', 'grams', 'kilogram', 'kilograms', 'pound', 'pounds', 'ounce', 'ounces']
+                if unit_lower in weight_units:
+                    # Standardize weight units
+                    if unit_lower in ['lbs', 'pound', 'pounds']:
+                        return 'lb'
+                    elif unit_lower in ['gram', 'grams']:
+                        return 'g'
+                    elif unit_lower in ['kilogram', 'kilograms']:
+                        return 'kg'
+                    elif unit_lower in ['ounce', 'ounces']:
+                        return 'oz'
+                    else:
+                        return unit_lower  # Already standard
+                
+                # Default to units for anything else
+                return 'units'
+            
+            # Apply conversion
+            df['unit'] = df['unit'].apply(convert_unit)
         
         return df
     

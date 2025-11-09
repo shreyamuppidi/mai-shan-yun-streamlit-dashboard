@@ -252,12 +252,25 @@ class DataLoader:
                     )
                     if has_data:
                         data.update(msy_data)
-                        # Return MSY data immediately - don't fall back to standard loader
                         # Ensure all required keys exist
                         required_keys = ['purchases', 'shipments', 'ingredients', 'sales', 'usage']
                         for key in required_keys:
                             if key not in data:
                                 data[key] = pd.DataFrame()
+                        
+                        # Apply preprocessing to all data (especially shipments for unit standardization)
+                        if self.preprocessor:
+                            if 'shipments' in data and not data['shipments'].empty:
+                                data['shipments'] = self.preprocessor.preprocess_shipments(data['shipments'])
+                            if 'purchases' in data and not data['purchases'].empty:
+                                data['purchases'] = self.preprocessor.preprocess_purchases(data['purchases'])
+                            if 'usage' in data and not data['usage'].empty:
+                                data['usage'] = self.preprocessor.preprocess_usage(data['usage'])
+                            if 'sales' in data and not data['sales'].empty:
+                                data['sales'] = self.preprocessor.preprocess_sales(data['sales'])
+                            if 'ingredients' in data and not data['ingredients'].empty:
+                                data['ingredients'] = self.preprocessor.preprocess_ingredients(data['ingredients'])
+                        
                         return data
             except Exception as e:
                 # Log error but continue to standard loader

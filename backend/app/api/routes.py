@@ -263,7 +263,7 @@ async def get_menu_forecast(
         from src.data_preprocessor import DataPreprocessor
         preprocessor = DataPreprocessor()
         is_count_based = preprocessor.is_count_based_ingredient(ingredient)
-        unit = 'count' if is_count_based else 'g'  # Default to grams for weight-based
+        unit = 'units' if is_count_based else 'g'  # Default to grams for weight-based, 'units' for count-based
         
         return {
             "forecast": dataframe_to_dict(forecast),
@@ -310,6 +310,66 @@ async def get_shipments():
         supplier_reliability = analytics.track_supplier_reliability()
         
         shipments = data.get('shipments', pd.DataFrame())
+        
+        # Ensure units are standardized (fallback if preprocessing didn't run)
+        if not shipments.empty and 'unit' in shipments.columns:
+            def standardize_unit(unit_val):
+                if pd.isna(unit_val) or unit_val == '':
+                    return 'units'
+                
+                unit_str = str(unit_val).lower().strip()
+                
+                # Direct mapping for non-weight units
+                non_weight_map = {
+                    'rolls': 'units',
+                    'roll': 'units',
+                    'pieces': 'units',
+                    'piece': 'units',
+                    'pcs': 'units',
+                    'pc': 'units',
+                    'eggs': 'units',
+                    'egg': 'units',
+                    'whole onion': 'units',
+                    'whole onions': 'units',
+                    'onion': 'units',
+                    'onions': 'units',
+                    'count': 'units',
+                }
+                
+                # Check exact match first
+                if unit_str in non_weight_map:
+                    return non_weight_map[unit_str]
+                
+                # Check if contains any non-weight pattern
+                for pattern in ['roll', 'piece', 'pcs', 'pc', 'egg', 'whole', 'onion', 'count']:
+                    if pattern in unit_str:
+                        return 'units'
+                
+                # Standardize weight units
+                weight_map = {
+                    'lbs': 'lb',
+                    'pound': 'lb',
+                    'pounds': 'lb',
+                    'gram': 'g',
+                    'grams': 'g',
+                    'kilogram': 'kg',
+                    'kilograms': 'kg',
+                    'ounce': 'oz',
+                    'ounces': 'oz'
+                }
+                
+                if unit_str in weight_map:
+                    return weight_map[unit_str]
+                
+                # Keep standard weight units as-is
+                if unit_str in ['lb', 'g', 'kg', 'oz']:
+                    return unit_str
+                
+                # Default to units for anything unrecognized
+                return 'units'
+            
+            shipments = shipments.copy()
+            shipments['unit'] = shipments['unit'].apply(standardize_unit)
         
         return {
             "delay_analysis": dataframe_to_dict(delay_analysis),
