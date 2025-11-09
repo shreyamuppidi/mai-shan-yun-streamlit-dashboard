@@ -82,7 +82,7 @@ export const ChatPanel: React.FC = () => {
     >
         <Card className="h-full flex flex-col border-0 rounded-none bg-transparent">
           <CardHeader className="flex flex-row items-center justify-between border-b border-white/20">
-            <CardTitle className="text-lg text-white">Yun Chef</CardTitle>
+            <CardTitle className="text-lg text-white">Chef Yun</CardTitle>
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
@@ -106,39 +106,54 @@ export const ChatPanel: React.FC = () => {
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full py-8 px-4">
                   <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 max-w-md w-full border border-white/20 shadow-lg">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
-                        <MessageSquare className="h-5 w-5 text-white" />
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
+                        <MessageSquare className="h-6 w-6 text-white" />
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-white">Yun Chef</h3>
-                        <p className="text-xs text-white/60">AI Assistant • Ready to help</p>
+                        <h3 className="text-xl font-semibold text-white">Chef Yun</h3>
+                        <p className="text-xs text-white/60">AI Inventory Intelligence Assistant</p>
                       </div>
                     </div>
-                    <p className="text-white/90 mb-4 text-sm leading-relaxed">
-                      👋 Hi! I can help you with:
+                    <p className="text-white/90 mb-6 text-sm leading-relaxed">
+                      Welcome! I'm here to help you make data-driven decisions for your restaurant operations.
                     </p>
-                    <div className="grid grid-cols-1 gap-2">
+                    <p className="text-white/70 mb-4 text-xs font-medium uppercase tracking-wide">
+                      Quick Insights
+                    </p>
+                    <div className="grid grid-cols-1 gap-2.5">
                       {[
-                        'Most used/wasted ingredients',
-                        'Revenue by dish',
-                        'Inventory status',
-                        'Cost analysis',
-                        'Menu viability',
-                        'Reorder recommendations'
+                        { label: 'Ingredient Analytics', query: 'What ingredient is used the most?' },
+                        { label: 'Revenue Intelligence', query: 'Which dish brings in the most money?' },
+                        { label: 'Inventory Status', query: 'What is the current inventory status?' },
+                        { label: 'Cost Analysis', query: 'Show me the cost analysis' },
+                        { label: 'Menu Viability', query: 'What dishes can I make with current inventory?' },
+                        { label: 'Smart Reordering', query: 'What items need reordering?' }
                       ].map((item, idx) => (
-                        <div
+                        <Button
                           key={idx}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors border border-white/10"
+                          variant="outline"
+                          onClick={() => {
+                            const userMessage: ChatMessage = {
+                              role: 'user',
+                              content: item.query,
+                            }
+                            setMessages((prev) => [...prev, userMessage])
+                            chatMutation.mutate(item.query)
+                          }}
+                          disabled={chatMutation.isPending}
+                          className="w-full justify-start text-left h-auto py-2.5 px-3 bg-white/5 hover:bg-white/15 border-white/20 text-white hover:text-white transition-all duration-200 group"
                         >
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0" />
-                          <span className="text-sm text-white/80">{item}</span>
-                        </div>
+                          <div className="flex items-center gap-3 w-full">
+                            <div className="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0 group-hover:scale-125 transition-transform" />
+                            <span className="text-sm font-medium flex-1">{item.label}</span>
+                          </div>
+                        </Button>
                       ))}
                     </div>
-                    <div className="mt-4 pt-4 border-t border-white/10">
-                      <p className="text-xs text-white/50 text-center">
-                        Ask me anything about your inventory
+                    <div className="mt-6 pt-4 border-t border-white/10">
+                      <p className="text-xs text-white/50 text-center italic">
+                        Click any suggestion above or type your question below
                       </p>
                     </div>
                   </div>

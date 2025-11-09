@@ -18,6 +18,16 @@ else
     source venv/bin/activate
 fi
 
+# Install dependencies if needed
+pip install -q -r requirements.txt 2>/dev/null || pip install -r requirements.txt
+
+# Load environment variables from .env file if it exists
+if [ -f "../.env" ]; then
+    set -a
+    source ../.env
+    set +a
+fi
+
 # Run with reload
 echo "Starting server on http://localhost:8000"
 uvicorn app.main:app --reload --port 8000 --host 0.0.0.0

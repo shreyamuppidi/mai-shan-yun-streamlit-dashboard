@@ -16,8 +16,15 @@ fi
 # Install dependencies if needed
 pip install -q -r requirements.txt 2>/dev/null || pip install -r requirements.txt
 
-# Set OpenRouter API key if available in .streamlit/secrets.toml
-if [ -f "../.streamlit/secrets.toml" ]; then
+# Load environment variables from .env file if it exists
+if [ -f "../.env" ]; then
+    set -a
+    source ../.env
+    set +a
+fi
+
+# Set OpenRouter API key if available in .streamlit/secrets.toml (fallback)
+if [ -f "../.streamlit/secrets.toml" ] && [ -z "$OPENROUTER_API_KEY" ]; then
     export OPENROUTER_API_KEY=$(grep OPENROUTER_API_KEY ../.streamlit/secrets.toml | cut -d'"' -f2)
 fi
 

@@ -591,8 +591,8 @@ Remember: You are Yun Chef, an AI assistant that can generate creative content l
                         break
         
         # Query routing logic - fetch relevant data
-        if any(word in query_lower for word in ['most used', 'highest usage', 'top ingredient', 'ingredient used', 'which ingredient is used']):
-            result = self._get_top_ingredients(metric='usage', limit=10, period_days=30)
+        if any(word in query_lower for word in ['most used', 'highest usage', 'top ingredient', 'ingredient used', 'which ingredient is used', 'ingredient is used', 'used the most']):
+            result = self._get_top_ingredients(metric='usage', limit=10, period_days=180)
             # Only create chart if explicitly requested
             if 'error' not in result and user_wants_chart:
                 chart_info = {'type': 'bar', 'data': result, 'title': 'Top Ingredients by Usage'}
@@ -952,16 +952,18 @@ Please provide a helpful response explaining the situation and suggesting what t
         # Handle greeting/help messages
         if 'info' in result:
             if result['info'] == 'greeting':
-                return """👋 Hi! I'm Yun Chef. I can help you with:
+                return """Welcome! I'm Yun Chef, your intelligent inventory management assistant. I'm here to help you make data-driven decisions for your restaurant operations.
 
-• Most used/wasted ingredients
-• Revenue by dish
-• Inventory status
-• Cost analysis
-• Menu viability
-• Reorder recommendations
+I can provide insights on:
 
-Ask me anything about your inventory!"""
+• **Ingredient Analytics** - Track usage patterns and identify waste
+• **Revenue Intelligence** - Analyze which dishes drive profitability
+• **Inventory Status** - Monitor stock levels and identify critical items
+• **Cost Analysis** - Understand spending patterns and optimize expenses
+• **Menu Viability** - Determine what you can prepare with current inventory
+• **Smart Reordering** - Get AI-powered recommendations for restocking
+
+Simply ask me anything about your inventory, or click on any of the suggestions above to get started!"""
             elif result['info'] == 'help':
                 return """I can help you with questions about your inventory! Try asking:
 
