@@ -963,9 +963,15 @@ class InventoryAnalytics:
                 velocity_30d = 0
             
             # Calculate days until stockout based on velocity
-            if velocity_7d > 0:
+            if current_stock <= 0:
+                # Already out of stock
+                days_until_stockout_velocity = 0
+            elif velocity_7d > 0:
+                # Calculate based on usage velocity
                 days_until_stockout_velocity = current_stock / velocity_7d
             else:
+                # No usage velocity (no usage in last 7 days) but stock exists
+                # This means it won't run out based on current usage pattern
                 days_until_stockout_velocity = 999
             
             # Risk assessment
@@ -1633,13 +1639,17 @@ class InventoryAnalytics:
         peak_month = max(seasonal_factors, key=seasonal_factors.get)
         low_month = min(seasonal_factors, key=seasonal_factors.get)
         
+        has_seasonality = abs(seasonal_factors[peak_month] - seasonal_factors[low_month]) > 0.2
+        # Convert numpy bool to Python bool for JSON serialization
+        has_seasonality = bool(has_seasonality) if has_seasonality is not None else False
+        
         return {
             'seasonal_factors': seasonal_factors,
-            'peak_month': peak_month,
-            'low_month': low_month,
-            'peak_factor': seasonal_factors[peak_month],
-            'low_factor': seasonal_factors[low_month],
-            'has_seasonality': abs(seasonal_factors[peak_month] - seasonal_factors[low_month]) > 0.2
+            'peak_month': int(peak_month),
+            'low_month': int(low_month),
+            'peak_factor': float(seasonal_factors[peak_month]),
+            'low_factor': float(seasonal_factors[low_month]),
+            'has_seasonality': has_seasonality
         }
     
     def adjust_forecast_for_events(self, ingredient: str, forecast: pd.DataFrame, 
@@ -1661,18 +1671,30 @@ class InventoryAnalytics:
         
         # Get current month for seasonality
         current_month = datetime.now().month
-        seasonality = self.detect_seasonality(ingredient)
+        try:
+            seasonality = self.detect_seasonality(ingredient)
+        except Exception as e:
+            # If seasonality detection fails, continue without seasonal adjustments
+            print(f"Warning: Could not detect seasonality: {str(e)}")
+            seasonality = {}
         
         adjusted_forecast = forecast.copy()
         
         # Apply seasonal adjustments
-        if seasonality.get('has_seasonality', False):
-            seasonal_factors = seasonality.get('seasonal_factors', {})
-            adjusted_forecast['month'] = adjusted_forecast['date'].dt.month
-            adjusted_forecast['seasonal_factor'] = adjusted_forecast['month'].map(seasonal_factors).fillna(1.0)
-            adjusted_forecast['forecasted_usage'] = adjusted_forecast['forecasted_usage'] * adjusted_forecast['seasonal_factor']
-            adjusted_forecast['confidence_low'] = adjusted_forecast['confidence_low'] * adjusted_forecast['seasonal_factor']
-            adjusted_forecast['confidence_high'] = adjusted_forecast['confidence_high'] * adjusted_forecast['seasonal_factor']
+        if seasonality and seasonality.get('has_seasonality', False):
+            try:
+                seasonal_factors = seasonality.get('seasonal_factors', {})
+                if seasonal_factors:
+                    adjusted_forecast['month'] = adjusted_forecast['date'].dt.month
+                    adjusted_forecast['seasonal_factor'] = adjusted_forecast['month'].map(seasonal_factors).fillna(1.0)
+                    adjusted_forecast['forecasted_usage'] = adjusted_forecast['forecasted_usage'] * adjusted_forecast['seasonal_factor']
+                    if 'confidence_low' in adjusted_forecast.columns:
+                        adjusted_forecast['confidence_low'] = adjusted_forecast['confidence_low'] * adjusted_forecast['seasonal_factor']
+                    if 'confidence_high' in adjusted_forecast.columns:
+                        adjusted_forecast['confidence_high'] = adjusted_forecast['confidence_high'] * adjusted_forecast['seasonal_factor']
+            except Exception as e:
+                # If seasonal adjustment fails, continue without it
+                print(f"Warning: Could not apply seasonal adjustments: {str(e)}")
         
         # Apply holiday adjustments (increase demand by 20% on holidays)
         try:
@@ -2150,64 +2172,65 @@ class InventoryAnalytics:
             if not future_purchases.empty:
                 expected_purchases = future_purchases.groupby('ingredient')['quantity'].sum().reset_index()
                 expected_purchases.columns = ['ingredient', 'expected_purchase_qty']
-        else:
-                # No future purchases in data - generate them based on shipment frequency
-                shipments = self.data.get('shipments', pd.DataFrame())
-                if not shipments.empty:
-                    # Check for frequency column (could be 'frequency' or 'Frequency')
-                    freq_col = None
-                    for col in shipments.columns:
-                        if 'frequency' in str(col).lower():
-                            freq_col = col
-                            break
-                    
-                    qty_col = None
-                    for col in shipments.columns:
-                        if 'quantity' in str(col).lower() or 'qty' in str(col).lower():
-                            qty_col = col
-                            break
-                    
-                    if freq_col and qty_col:
-                        future_purchase_list = []
-                        for _, row in shipments.iterrows():
-                            ingredient = row.get('ingredient', '')
-                            if pd.isna(ingredient) or not ingredient:
-                                continue
-                                
-                            qty_per_shipment = pd.to_numeric(row.get(qty_col, 0), errors='coerce') or 0
-                            frequency = str(row.get(freq_col, 'weekly')).lower()
+        
+        # If no future purchases found, generate them based on shipment frequency
+        if expected_purchases.empty:
+            shipments = self.data.get('shipments', pd.DataFrame())
+            if not shipments.empty:
+                # Check for frequency column (could be 'frequency' or 'Frequency')
+                freq_col = None
+                for col in shipments.columns:
+                    if 'frequency' in str(col).lower():
+                        freq_col = col
+                        break
+                
+                qty_col = None
+                for col in shipments.columns:
+                    if 'quantity' in str(col).lower() or 'qty' in str(col).lower():
+                        qty_col = col
+                        break
+                
+                if freq_col and qty_col:
+                    future_purchase_list = []
+                    for _, row in shipments.iterrows():
+                        ingredient = row.get('ingredient', '')
+                        if pd.isna(ingredient) or not ingredient:
+                            continue
                             
-                            if qty_per_shipment <= 0:
-                                continue
-                            
-                            # Calculate days between shipments
-                            if 'weekly' in frequency:
-                                days_between = 7
-                            elif 'biweekly' in frequency or 'bi-weekly' in frequency:
-                                days_between = 14
-                            elif 'monthly' in frequency:
-                                days_between = 30
-                            else:
-                                days_between = 7  # Default to weekly
-                            
-                            # Generate purchase dates in the future
-                            # Start from the next expected shipment date
-                            purchase_date = current_date + timedelta(days=days_between)
-                            purchase_count = 0
-                            max_purchases = int(days_ahead / days_between) + 2  # Add buffer
-                            
-                            while purchase_date <= future_date and purchase_count < max_purchases:
-                                future_purchase_list.append({
-                                    'ingredient': str(ingredient).strip(),
-                                    'quantity': qty_per_shipment
-                                })
-                                purchase_date += timedelta(days=days_between)
-                                purchase_count += 1
+                        qty_per_shipment = pd.to_numeric(row.get(qty_col, 0), errors='coerce') or 0
+                        frequency = str(row.get(freq_col, 'weekly')).lower()
                         
-                        if future_purchase_list:
-                            future_purchases_df = pd.DataFrame(future_purchase_list)
-                            expected_purchases = future_purchases_df.groupby('ingredient')['quantity'].sum().reset_index()
-                            expected_purchases.columns = ['ingredient', 'expected_purchase_qty']
+                        if qty_per_shipment <= 0:
+                            continue
+                        
+                        # Calculate days between shipments
+                        if 'weekly' in frequency:
+                            days_between = 7
+                        elif 'biweekly' in frequency or 'bi-weekly' in frequency:
+                            days_between = 14
+                        elif 'monthly' in frequency:
+                            days_between = 30
+                        else:
+                            days_between = 7  # Default to weekly
+                        
+                        # Generate purchase dates in the future
+                        # Start from the next expected shipment date
+                        purchase_date = current_date + timedelta(days=days_between)
+                        purchase_count = 0
+                        max_purchases = int(days_ahead / days_between) + 2  # Add buffer
+                        
+                        while purchase_date <= future_date and purchase_count < max_purchases:
+                            future_purchase_list.append({
+                                'ingredient': str(ingredient).strip(),
+                                'quantity': qty_per_shipment
+                            })
+                            purchase_date += timedelta(days=days_between)
+                            purchase_count += 1
+                    
+                    if future_purchase_list:
+                        future_purchases_df = pd.DataFrame(future_purchase_list)
+                        expected_purchases = future_purchases_df.groupby('ingredient')['quantity'].sum().reset_index()
+                        expected_purchases.columns = ['ingredient', 'expected_purchase_qty']
         
         # Get expected usage in the next days_ahead days (based on historical average)
         expected_usage = pd.DataFrame()
@@ -2486,8 +2509,23 @@ class InventoryAnalytics:
         # Method 1: Try to load recipe matrix directly FIRST (most reliable source of truth)
         try:
             from pathlib import Path
-            recipe_file = Path("data") / "MSY Data - Ingredient.csv"
-            if recipe_file.exists():
+            import os
+            # Try multiple possible paths for recipe matrix
+            # analytics.py is in src/, so we need to go up to project root
+            current_file = Path(__file__)
+            project_root = current_file.parent.parent  # src/ -> project root
+            possible_paths = [
+                project_root / "data" / "MSY Data - Ingredient.csv",
+                Path("data") / "MSY Data - Ingredient.csv",
+                Path("../data") / "MSY Data - Ingredient.csv",
+            ]
+            recipe_file = None
+            for path in possible_paths:
+                if path.exists():
+                    recipe_file = path
+                    break
+            
+            if recipe_file and recipe_file.exists():
                 recipe_matrix = pd.read_csv(recipe_file)
                 if not recipe_matrix.empty and 'Item name' in recipe_matrix.columns:
                     # Convert recipe matrix to long format
@@ -2701,7 +2739,8 @@ class InventoryAnalytics:
                     
                     # Ensure current_stock is not NaN
                     if pd.isna(current_stock):
-                        missing_ingredients.append(ingredient)
+                        inv_ing_name = stock_row['ingredient'].iloc[0]
+                        missing_ingredients.append(f"{inv_ing_name} (out of stock)")
                         servings_possible.append(0)
                         continue
                     
@@ -2711,7 +2750,7 @@ class InventoryAnalytics:
                         if current_stock <= 0:
                             # Use the actual inventory ingredient name for clarity
                             inv_ing_name = stock_row['ingredient'].iloc[0]
-                            missing_ingredients.append(f"{inv_ing_name} (out of stock: {max(0, current_stock):.1f})")
+                            missing_ingredients.append(f"{inv_ing_name} (out of stock)")
                             servings_possible.append(0)
                         else:
                             # Calculate servings and ensure it's never negative
@@ -2758,12 +2797,14 @@ class InventoryAnalytics:
                     can_make = False
                     viability_status = 'Cannot Make'
             
-            # Format missing ingredients nicely - extract only ingredient names
+            # Format missing ingredients - show only ingredient names (no status labels)
             if missing_ingredients:
                 def extract_ingredient_name(ing_str):
-                    """Extract just the ingredient name, removing (out of stock: X) or (not in inventory)"""
+                    """Extract just the ingredient name, removing status labels"""
                     if isinstance(ing_str, str):
-                        # Remove "(out of stock: X.X)" pattern
+                        # Remove "(out of stock)" pattern
+                        ing_str = ing_str.split(' (out of stock)')[0]
+                        # Remove "(out of stock: X.X)" pattern (old format)
                         ing_str = ing_str.split(' (out of stock:')[0]
                         # Remove "(not in inventory)" pattern
                         ing_str = ing_str.split(' (not in inventory)')[0]
@@ -2824,19 +2865,66 @@ class InventoryAnalytics:
         menu_item_changes = scenario.get('menu_item_changes', {})
         
         # Simulate sales changes
-        if sales_multiplier != 1.0 and 'sales' in simulated_data and not simulated_data['sales'].empty:
+        if 'sales' in simulated_data and not simulated_data['sales'].empty:
             simulated_sales = simulated_data['sales'].copy()
-            simulated_sales['quantity_sold'] = simulated_sales['quantity_sold'] * sales_multiplier
+            
+            # Apply menu item specific changes to sales first
+            if 'menu_item' in simulated_sales.columns and menu_item_changes:
+                for menu_item, multiplier in menu_item_changes.items():
+                    # Try exact match first
+                    mask = simulated_sales['menu_item'].astype(str).str.strip() == str(menu_item).strip()
+                    if mask.sum() == 0:
+                        # Try case-insensitive match
+                        mask = simulated_sales['menu_item'].astype(str).str.strip().str.lower() == str(menu_item).strip().lower()
+                    if mask.sum() == 0:
+                        # Try partial match
+                        mask = simulated_sales['menu_item'].astype(str).str.contains(str(menu_item).strip(), case=False, na=False)
+                    
+                    if mask.sum() > 0 and 'quantity_sold' in simulated_sales.columns:
+                        simulated_sales.loc[mask, 'quantity_sold'] = simulated_sales.loc[mask, 'quantity_sold'] * multiplier
+            
+            # Apply overall sales multiplier
+            if sales_multiplier != 1.0 and 'quantity_sold' in simulated_sales.columns:
+                simulated_sales['quantity_sold'] = simulated_sales['quantity_sold'] * sales_multiplier
+            
             simulated_data['sales'] = simulated_sales
+            
+            # Always regenerate usage from sales to ensure menu item changes are reflected
+            # This is critical for the simulator to work correctly
+            if 'menu_item' in simulated_sales.columns and not simulated_sales.empty:
+                try:
+                    from pathlib import Path
+                    from src.msy_data_loader import MSYDataLoader
+                    loader = MSYDataLoader(data_dir=str(Path(__file__).parent.parent / "data"))
+                    # Only regenerate usage from sales up to current_date to match base calculation
+                    sales_for_usage = simulated_sales[simulated_sales['date'] <= current_date].copy() if 'date' in simulated_sales.columns else simulated_sales.copy()
+                    regenerated_usage = loader.generate_usage_from_sales_and_recipes(sales_for_usage)
+                    if not regenerated_usage.empty:
+                        simulated_data['usage'] = regenerated_usage
+                except Exception as e:
+                    # If regeneration fails, try to continue with existing usage
+                    import warnings
+                    warnings.warn(f"Could not regenerate usage from sales: {str(e)}")
+                    pass
         
         # Simulate usage changes based on sales
-        if 'usage' in simulated_data and not simulated_data['usage'].empty and 'menu_item' in simulated_data['usage'].columns:
+        if 'usage' in simulated_data and not simulated_data['usage'].empty:
             simulated_usage = simulated_data['usage'].copy()
             
-            # Apply menu item specific changes
-            for menu_item, multiplier in menu_item_changes.items():
-                mask = simulated_usage['menu_item'] == menu_item
-                simulated_usage.loc[mask, 'quantity_used'] = simulated_usage.loc[mask, 'quantity_used'] * multiplier
+            # Apply menu item specific changes if menu_item column exists
+            if 'menu_item' in simulated_usage.columns and menu_item_changes:
+                for menu_item, multiplier in menu_item_changes.items():
+                    # Try exact match first
+                    mask = simulated_usage['menu_item'].astype(str).str.strip() == str(menu_item).strip()
+                    if mask.sum() == 0:
+                        # Try case-insensitive match
+                        mask = simulated_usage['menu_item'].astype(str).str.strip().str.lower() == str(menu_item).strip().lower()
+                    if mask.sum() == 0:
+                        # Try partial match
+                        mask = simulated_usage['menu_item'].astype(str).str.contains(str(menu_item).strip(), case=False, na=False)
+                    
+                    if mask.sum() > 0:
+                        simulated_usage.loc[mask, 'quantity_used'] = simulated_usage.loc[mask, 'quantity_used'] * multiplier
             
             # Apply overall sales multiplier
             if sales_multiplier != 1.0:
@@ -2856,20 +2944,40 @@ class InventoryAnalytics:
                 simulated_shipments['date'] = pd.to_datetime(simulated_shipments['date'], errors='coerce')
                 
                 # Filter future shipments
-            future_shipments = simulated_shipments[simulated_shipments['date'] > current_date].copy()
-            if not future_shipments.empty:
+                future_shipments = simulated_shipments[simulated_shipments['date'] > current_date].copy()
+                if not future_shipments.empty:
                     # Add delay to future shipment dates
-                simulated_shipments.loc[simulated_shipments['date'] > current_date, 'date'] = (
-                    simulated_shipments.loc[simulated_shipments['date'] > current_date, 'date'] + 
-                    pd.to_timedelta(supplier_delay_days, unit='D')
-                )
-                simulated_data['shipments'] = simulated_shipments
+                    simulated_shipments.loc[simulated_shipments['date'] > current_date, 'date'] = (
+                        simulated_shipments.loc[simulated_shipments['date'] > current_date, 'date'] + 
+                        pd.to_timedelta(supplier_delay_days, unit='D')
+                    )
+                    simulated_data['shipments'] = simulated_shipments
             # If shipments don't have dates (frequency-based), delays are simulated through purchases
             # The delay will affect future purchases generated from shipment frequency
         
         # Calculate simulated inventory
         simulated_analytics = InventoryAnalytics(simulated_data)
         simulated_inventory = simulated_analytics.calculate_inventory_levels(current_date)
+        
+        # Also calculate usage changes to show impact even when stock is 0
+        base_usage = self.data.get('usage', pd.DataFrame())
+        simulated_usage = simulated_data.get('usage', pd.DataFrame())
+        
+        # Aggregate usage changes
+        base_usage_agg = pd.DataFrame()
+        simulated_usage_agg = pd.DataFrame()
+        
+        if not base_usage.empty and 'ingredient' in base_usage.columns:
+            base_usage_filtered = base_usage[base_usage['date'] <= current_date].copy()
+            if not base_usage_filtered.empty:
+                base_usage_agg = base_usage_filtered.groupby('ingredient')['quantity_used'].sum().reset_index()
+                base_usage_agg.columns = ['ingredient', 'total_used_base']
+        
+        if not simulated_usage.empty and 'ingredient' in simulated_usage.columns:
+            simulated_usage_filtered = simulated_usage[simulated_usage['date'] <= current_date].copy()
+            if not simulated_usage_filtered.empty:
+                simulated_usage_agg = simulated_usage_filtered.groupby('ingredient')['quantity_used'].sum().reset_index()
+                simulated_usage_agg.columns = ['ingredient', 'total_used_simulated']
         
         # Compare with base
         comparison = base_inventory.merge(
@@ -2879,13 +2987,49 @@ class InventoryAnalytics:
             suffixes=('_base', '_simulated')
         ).fillna(0)
         
+        # Add usage changes
+        if not base_usage_agg.empty:
+            comparison = comparison.merge(base_usage_agg, on='ingredient', how='left').fillna(0)
+        else:
+            comparison['total_used_base'] = 0
+        
+        if not simulated_usage_agg.empty:
+            comparison = comparison.merge(simulated_usage_agg, on='ingredient', how='left').fillna(0)
+        else:
+            comparison['total_used_simulated'] = 0
+        
+        # Calculate stock change (this will be 0 if both are capped at 0, but we can show usage change)
         comparison['stock_change'] = comparison['current_stock_simulated'] - comparison['current_stock_base']
-        comparison['stock_change_percentage'] = (
-            (comparison['stock_change'] / comparison['current_stock_base'] * 100)
-            .replace([np.inf, -np.inf], 0)
-            .fillna(0)
-            .round(2)
-        )
+        
+        # Calculate usage change to show impact even when stock is 0
+        comparison['usage_change'] = comparison['total_used_simulated'] - comparison['total_used_base']
+        
+        # Calculate stock change percentage - handle zero base stock case
+        def calc_stock_change_pct(row):
+            base = row['current_stock_base']
+            change = row['stock_change']
+            usage_change = row.get('usage_change', 0)
+            
+            if base == 0:
+                # If base is 0, show percentage based on usage change
+                # Normalize usage change to a percentage (use min_stock_level as reference if available)
+                min_level = row.get('min_stock_level', 20)  # Default to 20 if not available
+                if usage_change != 0 and min_level > 0:
+                    # Calculate percentage based on min_stock_level as reference
+                    pct = (usage_change / min_level * 100)
+                    # Cap at reasonable range
+                    pct = max(-1000, min(1000, pct))
+                    return round(pct, 2)
+                elif change != 0:
+                    return 100.0 if change > 0 else -100.0
+                return 0.0
+            else:
+                pct = (change / base * 100)
+                if np.isinf(pct) or np.isnan(pct):
+                    return 0.0
+                return round(pct, 2)
+        
+        comparison['stock_change_percentage'] = comparison.apply(calc_stock_change_pct, axis=1)
         comparison['days_change'] = comparison['days_until_stockout_simulated'] - comparison['days_until_stockout_base']
         
         return comparison

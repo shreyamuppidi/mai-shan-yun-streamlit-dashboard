@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mai Shan Yun Inventory Dashboard</title>
+    <style>
+      /* Loading fallback */
+      #root:empty::before {
+        content: "Loading...";
+        display: block;
+        padding: 20px;
+        text-align: center;
+        font-size: 18px;
+        color: #666;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Show loading message if React doesn't mount within 3 seconds
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        if (root && root.children.length === 0) {
+          root.innerHTML = '<div style="padding: 20px; text-align: center;"><h1>Loading Mai Shan Yun Dashboard...</h1><p>If this message persists, check the browser console for errors.</p><p style="color: red; margin-top: 20px;">⚠️ JavaScript may not be loading. Check browser console (Cmd+Option+C)</p></div>';
+        }
+      }, 3000);
+      
+      // Log when script loads
+      console.log('✅ HTML script loaded');
+      
+      // Check if main.tsx loads - improved error handler
+      window.addEventListener('error', function(e) {
+        // Only log if it's a real error with details
+        if (e.message && e.message !== 'Script error.') {
+          console.error('❌ Script error:', e.message, e.filename || e.target?.src, e.lineno || e.colno);
+        }
+        // Don't overwrite React content - let ErrorBoundary handle it
+      }, true);
+    </script>
+    <noscript>
+      <div style="padding: 20px; text-align: center; color: red;">
+        <h1>JavaScript is required</h1>
+        <p>Please enable JavaScript to use this application.</p>
+      </div>
+    </noscript>
+  </body>
+</html>
+
