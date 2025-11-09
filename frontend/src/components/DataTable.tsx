@@ -84,39 +84,43 @@ export function DataTable<T extends Record<string, any>>({
   }
 
   return (
-    <Card className={cn('', className)}>
+    <Card className={cn('bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-white/10 shadow-lg', className)}>
       {title && (
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
+        <CardHeader className="border-b border-white/10">
+          <CardTitle className="text-lg font-bold text-white">{title}</CardTitle>
         </CardHeader>
       )}
-      <CardContent>
+      <CardContent className="pt-6">
         {searchable && (
-          <div className="mb-4">
+          <div className="mb-6">
             <Input
               placeholder={searchPlaceholder}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="max-w-sm"
+              className="max-w-sm bg-white/5 border-white/20 text-white placeholder:text-white/50 focus:border-blue-500/50 focus:ring-blue-500/20"
             />
           </div>
         )}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg border border-white/10">
           <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b border-white/20">
+              <tr className="bg-gradient-to-r from-white/10 to-white/5 border-b border-white/20">
                 {columns.map((column) => (
                   <th
                     key={String(column.key)}
                     className={cn(
-                      'text-left p-3 font-medium text-sm text-white/90',
-                      column.sortable && 'cursor-pointer hover:bg-white/10 transition-colors'
+                      'text-left p-4 font-semibold text-sm text-white/95 uppercase tracking-wider',
+                      column.sortable && 'cursor-pointer hover:bg-white/15 transition-all duration-200 group'
                     )}
                     onClick={() => column.sortable && handleSort(column.key)}
                   >
                     <div className="flex items-center gap-2">
                       {column.label}
-                      {column.sortable && getSortIcon(column.key)}
+                      {column.sortable && (
+                        <span className="opacity-60 group-hover:opacity-100 transition-opacity">
+                          {getSortIcon(column.key)}
+                        </span>
+                      )}
                     </div>
                   </th>
                 ))}
@@ -125,15 +129,26 @@ export function DataTable<T extends Record<string, any>>({
             <tbody>
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length} className="text-center p-8 text-white/60">
-                    No data available
+                  <td colSpan={columns.length} className="text-center p-12 text-white/50">
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="text-2xl">📊</span>
+                      <span>No data available</span>
+                    </div>
                   </td>
                 </tr>
               ) : (
                 filteredData.map((row, idx) => (
-                  <tr key={idx} className="border-b border-white/10 hover:bg-white/5 transition-colors">
+                  <tr 
+                    key={idx} 
+                    className={cn(
+                      'border-b border-white/5 transition-all duration-200',
+                      'hover:bg-gradient-to-r hover:from-white/10 hover:to-transparent',
+                      'hover:shadow-lg hover:shadow-blue-500/10',
+                      idx % 2 === 0 ? 'bg-white/2' : 'bg-white/1'
+                    )}
+                  >
                     {columns.map((column) => (
-                      <td key={String(column.key)} className="p-3 text-sm text-white/80">
+                      <td key={String(column.key)} className="p-4 text-sm text-white/85">
                         {column.render
                           ? column.render(row[column.key as keyof T], row)
                           : String(row[column.key as keyof T] ?? '')}

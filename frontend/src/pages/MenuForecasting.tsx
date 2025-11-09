@@ -40,19 +40,26 @@ export const MenuForecasting: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Menu-Driven Ingredient Forecasting</h1>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-1 h-10 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-blue-200 to-purple-200 bg-clip-text text-transparent">
+          Menu-Driven Ingredient Forecasting
+        </h1>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Forecast Parameters</CardTitle>
+      <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-white/10 shadow-lg">
+        <CardHeader className="border-b border-white/10">
+          <CardTitle className="text-lg font-bold text-white">Forecast Parameters</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-6">
           <div>
-            <label className="text-sm font-medium mb-2 block">Ingredient</label>
+            <label className="text-sm font-semibold mb-3 block text-white/90">
+              Ingredient
+            </label>
             <Select
               value={selectedIngredient}
               onChange={(e) => setSelectedIngredient(e.target.value)}
-              className="w-full"
+              className="w-full bg-white/5 border-white/20 text-white focus:border-blue-500/50 focus:ring-blue-500/20"
             >
               <option value="">Select an ingredient...</option>
               {ingredients.map((ingredient: string) => (
@@ -63,8 +70,8 @@ export const MenuForecasting: React.FC = () => {
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium mb-2 block">
-              Forecast Days Ahead: {forecastDays}
+            <label className="text-sm font-semibold mb-3 block text-white/90">
+              Forecast Days Ahead: <span className="text-blue-400 font-bold">{forecastDays}</span>
             </label>
             <Slider
               min={7}
@@ -87,28 +94,37 @@ export const MenuForecasting: React.FC = () => {
             const displayUnit = isCountBased ? 'count' : unit
             
             return (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <MetricCard
                   title="Daily Forecast"
                   value={`${data.summary.daily_forecast.toFixed(isCountBased ? 0 : 1)} ${displayUnit}`}
+                  gradient="blue"
+                  animationDelay={0.1}
                 />
                 <MetricCard
                   title={`Total Forecast (${forecastDays} days)`}
                   value={`${data.summary.total_forecast.toFixed(isCountBased ? 0 : 1)} ${displayUnit}`}
+                  gradient="purple"
+                  animationDelay={0.2}
                 />
                 <MetricCard
                   title="Average Daily"
                   value={`${data.summary.avg_forecast.toFixed(isCountBased ? 0 : 1)} ${displayUnit}`}
+                  gradient="green"
+                  animationDelay={0.3}
                 />
               </div>
             )
           })()}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Menu-Driven Forecast for {selectedIngredient}</CardTitle>
+          <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-blue-500/30 shadow-xl">
+            <CardHeader className="border-b border-white/10">
+              <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
+                <span className="w-1 h-6 bg-gradient-to-b from-blue-400 to-purple-500 rounded-full" />
+                Menu-Driven Forecast for {selectedIngredient}
+              </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               <PlotlyChart
                 data={[
                   {
@@ -117,6 +133,19 @@ export const MenuForecasting: React.FC = () => {
                     type: 'scatter',
                     mode: 'lines+markers',
                     name: 'Forecast',
+                    line: {
+                      color: 'rgb(59, 130, 246)',
+                      width: 3,
+                      shape: 'spline',
+                    },
+                    marker: {
+                      color: 'rgb(59, 130, 246)',
+                      size: 8,
+                      line: {
+                        color: 'rgb(255, 255, 255)',
+                        width: 2,
+                      },
+                    },
                   },
                   {
                     x: [
@@ -131,27 +160,38 @@ export const MenuForecasting: React.FC = () => {
                     mode: 'lines',
                     name: 'Confidence Interval',
                     fill: 'toself',
-                    fillcolor: 'rgba(0,100,255,0.2)',
+                    fillcolor: 'rgba(59, 130, 246, 0.15)',
                     line: { color: 'rgba(255,255,255,0)' },
+                    hoverinfo: 'skip',
                   },
                 ]}
                 layout={{
-                  height: 400,
-                  xaxis: { title: 'Date' },
+                  height: 450,
+                  xaxis: { 
+                    title: 'Date',
+                    titlefont: { size: 14, color: 'rgba(255, 255, 255, 0.9)' },
+                  },
                   yaxis: { 
                     title: `Daily Forecasted Usage (${data.unit || 'units'})`,
+                    titlefont: { size: 14, color: 'rgba(255, 255, 255, 0.9)' },
                   },
+                  paper_bgcolor: 'rgba(0, 0, 0, 0)',
+                  plot_bgcolor: 'rgba(0, 0, 0, 0)',
                 }}
+                animationDelay={0.4}
               />
             </CardContent>
           </Card>
 
           {data.impact_scores && data.impact_scores.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Ingredient Impact Scores by Menu Item</CardTitle>
+            <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-purple-500/30 shadow-xl">
+              <CardHeader className="border-b border-white/10">
+                <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
+                  <span className="w-1 h-6 bg-gradient-to-b from-purple-400 to-pink-500 rounded-full" />
+                  Ingredient Impact Scores by Menu Item
+                </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-6 space-y-6">
                 <PlotlyChart
                   data={[
                     {
@@ -161,41 +201,76 @@ export const MenuForecasting: React.FC = () => {
                       orientation: 'h',
                       marker: {
                         color: data.impact_scores.map((item: any) => item.impact_score),
-                        colorscale: 'Blues',
+                        colorscale: [
+                          [0, 'rgba(99, 102, 241, 0.6)'],
+                          [0.5, 'rgba(139, 92, 246, 0.7)'],
+                          [1, 'rgba(236, 72, 153, 0.8)'],
+                        ],
+                        line: {
+                          color: 'rgba(255, 255, 255, 0.3)',
+                          width: 1,
+                        },
+                        cmin: Math.min(...data.impact_scores.map((item: any) => item.impact_score)),
+                        cmax: Math.max(...data.impact_scores.map((item: any) => item.impact_score)),
                       },
                     },
                   ]}
                   layout={{
                     height: 400,
-                    xaxis: { title: 'Impact Score' },
-                    yaxis: { title: 'Menu Item' },
+                    xaxis: { 
+                      title: 'Impact Score',
+                      titlefont: { size: 14, color: 'rgba(255, 255, 255, 0.9)' },
+                    },
+                    yaxis: { 
+                      title: 'Menu Item',
+                      titlefont: { size: 14, color: 'rgba(255, 255, 255, 0.9)' },
+                    },
+                    paper_bgcolor: 'rgba(0, 0, 0, 0)',
+                    plot_bgcolor: 'rgba(0, 0, 0, 0)',
                   }}
+                  animationDelay={0.5}
                 />
-                <DataTable
-                  data={data.impact_scores}
-                  columns={[
-                    { key: 'menu_item', label: 'Menu Item', sortable: true },
-                    {
-                      key: 'usage_per_serving',
-                      label: `Usage Per Serving (${data.unit || 'units'})`,
-                      sortable: true,
-                      render: (value: any) => {
-                        const isCountBased = data.is_count_based || false
-                        return isCountBased ? Math.round(Number(value)) : Number(value).toFixed(2)
+                <div className="pt-4">
+                  <DataTable
+                    data={data.impact_scores}
+                    columns={[
+                      { key: 'menu_item', label: 'Menu Item', sortable: true },
+                      {
+                        key: 'usage_per_serving',
+                        label: `Usage Per Serving (${data.unit || 'units'})`,
+                        sortable: true,
+                        render: (value: any) => {
+                          const isCountBased = data.is_count_based || false
+                          return (
+                            <span className="font-medium text-blue-300">
+                              {isCountBased ? Math.round(Number(value)) : Number(value).toFixed(2)}
+                            </span>
+                          )
+                        },
                       },
-                    },
-                    {
-                      key: 'popularity_score',
-                      label: 'Popularity Score',
-                      sortable: true,
-                    },
-                    {
-                      key: 'impact_score',
-                      label: 'Impact Score',
-                      sortable: true,
-                    },
-                  ]}
-                />
+                      {
+                        key: 'popularity_score',
+                        label: 'Popularity Score',
+                        sortable: true,
+                        render: (value: any) => (
+                          <span className="font-medium text-purple-300">
+                            {Number(value).toFixed(2)}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: 'impact_score',
+                        label: 'Impact Score',
+                        sortable: true,
+                        render: (value: any) => (
+                          <span className="font-bold text-pink-300">
+                            {Number(value).toFixed(2)}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}
@@ -203,9 +278,16 @@ export const MenuForecasting: React.FC = () => {
       )}
 
       {!selectedIngredient && (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            Please select an ingredient to view forecast
+        <Card className="bg-gradient-to-br from-slate-900/90 via-slate-800/90 to-slate-900/90 border-2 border-white/10 shadow-lg">
+          <CardContent className="py-16 text-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
+                <span className="text-4xl">📊</span>
+              </div>
+              <p className="text-white/70 text-lg font-medium">
+                Please select an ingredient to view forecast
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}
